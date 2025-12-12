@@ -167,8 +167,8 @@ def scan_workspace_for_dataflows(workspace_id: str):
         # Current directory
         output_file = filename
     
-    # Check if lakehouse path
-    if output_file.startswith('/lakehouse/'):
+    # Check if lakehouse path (supports both /lakehouse/ and abfss://)
+    if output_file.startswith('/lakehouse/') or output_file.startswith('abfss://'):
         try:
             from notebookutils import mssparkutils
             mssparkutils.fs.put(output_file, json.dumps(results, indent=2), overwrite=True)
