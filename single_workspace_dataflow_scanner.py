@@ -247,33 +247,47 @@ def scan_workspace_for_dataflows(workspace_id: str):
     workspace_name_clean = results['workspace_name'].replace(' ', '_').replace('/', '_').replace('\\', '_')
     timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"workspace_{workspace_name_clean}_{timestamp_str}_dataflows.json"
+    raw_filename = f"workspace_{workspace_name_clean}_{timestamp_str}_raw_scan.json"
     
     # Combine with output directory if provided
     if OUTPUT_DIRECTORY:
         if OUTPUT_DIRECTORY.startswith('/lakehouse/'):
             # Lakehouse path - ensure proper formatting
             output_file = OUTPUT_DIRECTORY.rstrip('/') + '/' + filename
+            raw_output_file = OUTPUT_DIRECTORY.rstrip('/') + '/' + raw_filename
         else:
             # Local path
             import os
             output_file = os.path.join(OUTPUT_DIRECTORY, filename)
+            raw_output_file = os.path.join(OUTPUT_DIRECTORY, raw_filename)
     else:
         # Current directory
         output_file = filename
+        raw_output_file = raw_filename
     
+    # Save processed results
     # Check if lakehouse path (supports both /lakehouse/ and abfss://)
     if output_file.startswith('/lakehouse/') or output_file.startswith('abfss://'):
         try:
             from notebookutils import mssparkutils
             mssparkutils.fs.put(output_file, json.dumps(results, indent=2), overwrite=True)
-            print(f"✅ Saved to lakehouse: {output_file}")
+            print(f"✅ Saved processed results to lakehouse: {output_file}")
+            
+            # Save raw scan results
+            mssparkutils.fs.put(raw_output_file, json.dumps(scan_result, indent=2), overwrite=True)
+            print(f"✅ Saved raw scan results to lakehouse: {raw_output_file}")
         except ImportError:
             print("⚠️  Lakehouse path specified but mssparkutils not available")
     else:
-        # Regular file save
+        # Regular file save - processed results
         with open(output_file, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"✅ Saved to file: {output_file}")
+        print(f"✅ Saved processed results to file: {output_file}")
+        
+        # Save raw scan results
+        with open(raw_output_file, 'w') as f:
+            json.dump(scan_result, f, indent=2)
+        print(f"✅ Saved raw scan results to file: {raw_output_file}")
     
     # Connection breakdown by type
     connection_types = {}
