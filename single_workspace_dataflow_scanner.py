@@ -3,7 +3,6 @@ Single Workspace Dataflow Gen2 Scanner
 Scans one workspace at a time to extract Dataflow Gen2 connection information
 """
 
-from powerbi_admin_api import PowerBIAdminAPI
 import json
 import time
 from datetime import datetime
@@ -15,9 +14,6 @@ from datetime import datetime
 TENANT_ID = "your-tenant-id"
 CLIENT_ID = "your-client-id"
 CLIENT_SECRET = "your-client-secret"
-
-# Target workspace
-WORKSPACE_ID = "your-workspace-id"
 
 # Output settings
 OUTPUT_DIRECTORY = None  # Set to directory path like "C:/output" or "/lakehouse/default/Files/pbi_scans" (None = current directory)
@@ -70,14 +66,97 @@ def scan_workspace_for_dataflows(workspace_id: str):
     if scan_result.get('workspaces'):
         workspace_info = scan_result['workspaces'][0]
     
-    # Extract dataflows
+    # Extract datasets and dataflows
+    datasets = scan_result.get('datasets', [])
     dataflows = scan_result.get('dataflows', [])
     
-    print(f"📊 Found {len(dataflows)} dataflow(s) in workspace\n")
+    print(f"📊 Found {len(datasets)} dataset(s) and {len(dataflows)} dataflow(s) in workspace\n")
     
-    # Process each dataflow
-    dataflow_details = []
+    # Process datasets
+    dataset_details = []
     all_connections = []
+    
+    for ds in datasets:
+        print(f"Dataset: {ds.get('name')}")
+        print(f"  ID: {ds.get('id')}")
+        print(f"  Configured by: {ds.get('configuredBy')}")
+        print(f"  Storage Mode: {ds.get('targetStorageMode')}")
+        
+        # Extract tables
+        tables = ds.get('tables', [])
+        print(f"  Tables: {len(tables)}")
+        for table in tables:
+            print(f"    • {table.get('name')} (Hidden: {table.get('isHidden', False)})")
+            columns = table.get('columns', [])
+            measures = table.get('measures', [])
+            if columns:
+                print(f"      - Columns: {len(columns)}")
+            if measures:
+                print(f"      - Measures: {len(measures)}")
+        
+        # Extract relationships
+        relationships = ds.get('relationships', [])
+        if relationships:
+            print(f"  Relationships: {len(relationships)}")
+        
+        # Extract expressions (parameters, queries)
+        expressions = ds.get('expressions', [])
+        if expressions:
+            print(f"  Expressions/Parameters: {len(expressions)}")
+            for expr in expressions:
+                print(f"    • {expr.get('name')} - {expr.get('description', 'No description')}")
+        
+        # Extract datasource usages
+        datasource_usages = ds.get('datasourceUsages', [])
+        print(f"  Datasource Usages: {len(datasource_usages)}")
+        
+        # Dataset summary
+        dataset_detail = {
+            'name': ds.get('name'),
+            'id': ds.get('id'),
+            'description': ds.get('description'),
+            'configured_by': ds.get('configuredBy'),
+            'created_date': ds.get('createdDate'),
+            'target_storage_mode': ds.get('targetStorageMode'),
+            'endorsement': ds.get('endorsementDetails'),
+            'sensitivity_label': ds.get('sensitivityLabel'),
+            'table_count': len(tables),
+            'tables': [{
+                'name': t.get('name'),
+                'is_hidden': t.get('isHidden', False),
+                'description': t.get('description'),
+                'column_count': len(t.get('columns', [])),
+                'measure_count': len(t.get('measures', [])),
+                'columns': [{
+                    'name': c.get('name'),
+                    'data_type': c.get('dataType'),
+                    'is_hidden': c.get('isHidden', False)
+                } for c in t.get('columns', [])],
+                'measures': [{
+                    'name': m.get('name'),
+                    'expression': m.get('expression'),
+                    'description': m.get('description')
+                } for m in t.get('measures', [])]
+            } for t in tables],
+            'relationship_count': len(relationships),
+            'relationships': relationships,
+            'expression_count': len(expressions),
+            'expressions': [{
+                'name': e.get('name'),
+                'description': e.get('description'),
+                'expression': e.get('expression')
+            } for e in expressions],
+            'datasource_usage_count': len(datasource_usages),
+            'datasource_usages': datasource_usages,
+            'upstream_dataflows': ds.get('upstreamDataflows', []),
+            'roles': ds.get('roles', [])
+        }
+        
+        dataset_details.append(dataset_detail)
+        print()
+    
+    # Process dataflows
+    dataflow_details = []
     
     for df in dataflows:
         print(f"Dataflow: {df.get('name')}")
@@ -119,6 +198,9 @@ def scan_workspace_for_dataflows(workspace_id: str):
             dataflow_connections.append(connection)
             all_connections.append(connection)
         
+        # Extract datasource usages (references to datasourceInstances)
+        datasource_usages = df.get('datasourceUsages', [])
+        
         # Dataflow summary
         dataflow_detail = {
             'name': df.get('name'),
@@ -127,14 +209,22 @@ def scan_workspace_for_dataflows(workspace_id: str):
             'configured_by': df.get('configuredBy'),
             'modified_by': df.get('modifiedBy'),
             'modified_date': df.get('modifiedDateTime'),
+            'endorsement': df.get('endorsementDetails'),
+            'sensitivity_label': df.get('sensitivityLabel'),
             'table_count': len(tables),
             'tables': [t.get('name') for t in tables],
             'connection_count': len(datasources),
-            'connections': dataflow_connections
+            'connections': dataflow_connections,
+            'datasource_usage_count': len(datasource_usages),
+            'datasource_usages': datasource_usages
         }
         
         dataflow_details.append(dataflow_detail)
         print()
+    
+    # Extract datasourceInstances from root level
+    datasource_instances = scan_result.get('datasourceInstances', [])
+    misconfigured_datasources = scan_result.get('misconfiguredDatasourceInstances', [])
     
     # Compile results
     results = {
@@ -143,10 +233,14 @@ def scan_workspace_for_dataflows(workspace_id: str):
         'workspace_name': workspace_info.get('name') if workspace_info else 'Unknown',
         'workspace_type': workspace_info.get('type') if workspace_info else 'Unknown',
         'capacity_id': workspace_info.get('capacityId') if workspace_info else None,
+        'dataset_count': len(datasets),
         'dataflow_count': len(dataflows),
         'total_connections': len(all_connections),
+        'datasets': dataset_details,
         'dataflows': dataflow_details,
-        'all_connections': all_connections
+        'all_connections': all_connections,
+        'datasource_instances': datasource_instances,
+        'misconfigured_datasources': misconfigured_datasources
     }
     
     # Create filename with workspace name and timestamp
@@ -181,16 +275,30 @@ def scan_workspace_for_dataflows(workspace_id: str):
             json.dump(results, f, indent=2)
         print(f"✅ Saved to file: {output_file}")
     
+    # Connection breakdown by type
+    connection_types = {}
+    for conn in all_connections:
+        conn_type = conn['datasource_type']
+        connection_types[conn_type] = connection_types.get(conn_type, 0) + 1
+    
+    results['connection_breakdown'] = connection_types
+    
     # Print summary
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
+    print("\n" + "="*70)
+    print("📋 SCAN SUMMARY")
+    print("="*70)
     print(f"Workspace: {results['workspace_name']}")
-    print(f"Dataflows found: {results['dataflow_count']}")
-    print(f"Total connections: {results['total_connections']}")
+    print(f"Datasets: {results['dataset_count']}")
+    print(f"Dataflows: {results['dataflow_count']}")
+    print(f"Total Connections: {results['total_connections']}")
+    print(f"Datasource Instances: {len(datasource_instances)}")
+    print(f"Misconfigured Datasources: {len(misconfigured_datasources)}")
+    print("\nConnection Breakdown:")
+    for conn_type, count in connection_types.items():
+        print(f"  • {conn_type}: {count}")
     
     if all_connections:
-        print(f"\nConnection breakdown:")
+        print(f"\nDetailed Connections:")
         from collections import Counter
         conn_types = Counter([c['datasource_type'] for c in all_connections])
         for conn_type, count in conn_types.most_common():
@@ -206,7 +314,10 @@ def scan_workspace_for_dataflows(workspace_id: str):
 # ============================================================
 
 if __name__ == "__main__":
-    results = scan_workspace_for_dataflows(WORKSPACE_ID)
+    # Specify workspace to scan
+    workspace_id = "your-workspace-guid"  # Replace with actual workspace GUID
+    
+    results = scan_workspace_for_dataflows(workspace_id)
     
     # Optional: Display specific connection details
     if PRINT_TO_CONSOLE:
