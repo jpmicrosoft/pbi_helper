@@ -10,6 +10,7 @@ Comprehensive Python wrapper for Microsoft Power BI Admin REST APIs with special
 - ✅ **Dashboard Operations**: Get dashboards, tiles, users
 - ✅ **Dataflow Operations**: Get dataflows, users
 - ✅ **Dataflow Gen2 Scanner**: Single workspace scanner for Dataflow Gen2 connections
+- ✅ **Dataflow Definition Extractor**: Extract Power Query M code and metadata from Dataflow Gen2
 - ✅ **App Operations**: List apps, get users
 - ✅ **Activity Logs**: Audit logs and activity events
 - ✅ **Tenant Settings**: Check metadata scanning settings
@@ -641,6 +642,297 @@ def scan_workspace_for_dataflows(
 - ✅ **Repeated scans** - scan different workspaces without hitting limits
 - ✅ **Fabric integration** - save directly to lakehouse
 
+---
+
+## Dataflow Definition Extractor
+
+**File**: `dataflow_definition_extractor.py`
+
+Extracts complete Dataflow Gen2 definitions including Power Query M code, query metadata, and platform settings from all dataflows in a workspace using the Microsoft Fabric Dataflow Definition API.
+
+### Key Features
+
+- ✅ **Power Query M Code**: Automatically decoded from base64 (mashup.pq)
+- ✅ **Query Metadata**: Full query configuration and settings (queryMetadata.json)
+- ✅ **Platform Metadata**: Platform-specific settings (.platform)
+- ✅ **Automatic Decoding**: Base64 payloads decoded automatically
+- ✅ **Individual Files**: Each dataflow saved separately with full workspace context
+- ✅ **Summary File**: Consolidated summary of all extractions
+- ✅ **Console Display**: View decoded M code and metadata during extraction
+- ✅ **Flexible Output**: Local files or Fabric lakehouse
+- ✅ **No Configuration File Edits**: Pass all parameters at runtime
+- ✅ **LRO Handling**: Automatic polling for long-running operations
+
+### Usage
+
+**All parameters are passed when calling the function - no need to edit the file!**
+
+#### Basic Usage (Local Python)
+
+```python
+from dataflow_definition_extractor import extract_dataflow_definitions
+
+# Run with all parameters
+results = extract_dataflow_definitions(
+    workspace_id="your-workspace-guid",
+    tenant_id="your-tenant-id",
+    client_id="your-client-id",
+    client_secret="your-client-secret",
+    output_directory=None,  # Current directory
+    print_to_console=True
+)
+```
+
+#### Fabric Notebook (Lakehouse)
+
+```python
+# PySpark/Fabric notebook
+results = extract_dataflow_definitions(
+    workspace_id="workspace-guid",
+    tenant_id="tenant-id",
+    client_id="client-id",
+    client_secret="client-secret",
+    output_directory="/lakehouse/default/Files/dataflow_definitions",
+    print_to_console=True
+)
+
+# Outputs to lakehouse:
+# /lakehouse/default/Files/dataflow_definitions/dataflow_Sales_ETL_20251212_143000_definition.json
+# /lakehouse/default/Files/dataflow_definitions/workspace_Sales_Analytics_20251212_143000_definitions_summary.json
+```
+
+### Output Files
+
+The extractor generates **individual files per dataflow** plus a **summary file**:
+
+#### 1. Individual Dataflow Files: `dataflow_{Name}_{Timestamp}_definition.json`
+
+Each file contains full workspace context and decoded definition:
+
+```json
+{
+  "workspace_id": "abc123-def456-789...",
+  "workspace_name": "Sales Analytics",
+  "dataflow_id": "dataflow-guid",
+  "dataflow_name": "Sales ETL",
+  "configured_by": "user@contoso.com",
+  "modified_date": "2025-12-12T14:30:00Z",
+  "extraction_timestamp": "2025-12-12T15:00:00",
+  
+  "definition": {
+    "parts": [
+      {
+        "path": "mashup.pq",
+        "payload": "section Section1;\n\nshared Customers = let\n    Source = Sql.Database(\"server.database.windows.net\", \"SalesDB\"),\n    CustomersTable = Source{[Schema=\"dbo\",Item=\"Customers\"]}[Data],\n    FilteredRows = Table.SelectRows(CustomersTable, each [Country] = \"USA\")\nin\n    FilteredRows;\n\nshared Orders = let\n    Source = Sql.Database(\"server.database.windows.net\", \"SalesDB\"),\n    OrdersTable = Source{[Schema=\"dbo\",Item=\"Orders\"]}[Data]\nin\n    OrdersTable;",
+        "payloadType": "DecodedText"
+      },
+      {
+        "path": "queryMetadata.json",
+        "payload": {
+          "formatVersion": "202502",
+          "name": "Sales ETL",
+          "description": "Sales data transformation",
+          "queries": [
+            {
+              "name": "Customers",
+              "queryGroup": null,
+              "loadEnabled": true
+            },
+            {
+              "name": "Orders",
+              "queryGroup": null,
+              "loadEnabled": true
+            }
+          ]
+        },
+        "payloadType": "DecodedJSON"
+      },
+      {
+        "path": ".platform",
+        "payload": {
+          "version": "1.0",
+          "dataflowRefreshSchedule": {...}
+        },
+        "payloadType": "DecodedJSON"
+      }
+    ]
+  }
+}
+```
+
+#### 2. Summary File: `workspace_{WorkspaceName}_{Timestamp}_definitions_summary.json`
+
+```json
+{
+  "extraction_timestamp": "2025-12-12T15:00:00",
+  "workspace_id": "abc123...",
+  "workspace_name": "Sales Analytics",
+  "total_dataflows": 3,
+  "successful_extractions": 3,
+  "failed_extractions": 0,
+  
+  "dataflows": [
+    {
+      "name": "Sales ETL",
+      "id": "dataflow-guid",
+      "status": "success",
+      "file_saved": "dataflow_Sales_ETL_20251212_150000_definition.json",
+      "parts_count": 3,
+      "parts": ["mashup.pq", "queryMetadata.json", ".platform"]
+    },
+    {
+      "name": "Marketing Data",
+      "id": "dataflow-guid-2",
+      "status": "success",
+      "file_saved": "dataflow_Marketing_Data_20251212_150030_definition.json",
+      "parts_count": 3,
+      "parts": ["mashup.pq", "queryMetadata.json", ".platform"]
+    }
+  ]
+}
+```
+
+### Console Output
+
+```
+============================================================
+EXTRACTING DATAFLOW DEFINITIONS FROM WORKSPACE
+============================================================
+Workspace ID: abc123-def456-789...
+Started: 2025-12-12 15:00:00
+
+🔄 Scanning workspace to find dataflows...
+✅ Found 3 dataflow(s)
+
+======================================================================
+📄 DATAFLOW 1/3: Sales ETL
+======================================================================
+Dataflow ID: dataflow-123
+Configured by: user@contoso.com
+Modified: 2025-12-11T10:30:00Z
+
+🔄 Extracting definition...
+✅ Definition extracted successfully!
+
+--- Power Query M Code (mashup.pq) ---
+section Section1;
+
+shared Customers = let
+    Source = Sql.Database("server.database.windows.net", "SalesDB"),
+    CustomersTable = Source{[Schema="dbo",Item="Customers"]}[Data],
+    FilteredRows = Table.SelectRows(CustomersTable, each [Country] = "USA")
+in
+    FilteredRows;
+
+shared Orders = let
+    Source = Sql.Database("server.database.windows.net", "SalesDB"),
+    OrdersTable = Source{[Schema="dbo",Item="Orders"]}[Data]
+in
+    OrdersTable;
+
+--- Query Metadata (queryMetadata.json) ---
+{
+  "formatVersion": "202502",
+  "name": "Sales ETL",
+  "queries": [
+    {"name": "Customers", "loadEnabled": true},
+    {"name": "Orders", "loadEnabled": true}
+  ]
+}
+
+--- Platform Metadata (.platform) ---
+{"version": "1.0", "dataflowRefreshSchedule": {...}}
+
+✅ Saved to: dataflow_Sales_ETL_20251212_150000_definition.json
+
+======================================================================
+📋 EXTRACTION SUMMARY
+======================================================================
+Workspace: Sales Analytics
+Total Dataflows: 3
+Successful: 3
+Failed: 0
+
+✅ Saved summary to: workspace_Sales_Analytics_20251212_150000_definitions_summary.json
+```
+
+### Function Parameters
+
+```python
+def extract_dataflow_definitions(
+    workspace_id: str,           # Required: Workspace GUID
+    tenant_id: str,              # Required: Azure AD tenant ID
+    client_id: str,              # Required: Service Principal client ID
+    client_secret: str,          # Required: Service Principal secret
+    output_directory: str = None, # Optional: Output path (None = current directory)
+    print_to_console: bool = True # Optional: Print detailed output with M code
+)
+```
+
+### API Details
+
+- **Endpoint**: `POST https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/dataflows/{dataflowId}/getDefinition`
+- **Authentication**: OAuth2 token (scope: `https://analysis.windows.net/powerbi/api/.default`)
+- **Required Permissions**: `Dataflow.ReadWrite.All` or `Item.ReadWrite.All`
+- **Response Pattern**: Long Running Operation (LRO)
+  - Initial response: `202 Accepted` with `Location` header
+  - Polling: GET to Location URL every 5 seconds
+  - Final response: `200 OK` with definition
+  - Timeout: 300 seconds (configurable)
+
+### Direct API Usage
+
+```python
+from powerbi_admin_api import PowerBIAdminAPI
+
+api = PowerBIAdminAPI(tenant_id, client_id, client_secret)
+
+# Get definition with automatic decoding (default)
+definition = api.get_dataflow_definition(
+    workspace_id="workspace-guid",
+    dataflow_id="dataflow-guid",
+    decode_payloads=True,  # Default: automatically decode base64
+    timeout=300,           # Max wait time for LRO
+    poll_interval=5        # Seconds between polls
+)
+
+# Access decoded M code
+for part in definition['definition']['parts']:
+    if part['path'] == 'mashup.pq':
+        m_code = part['payload']  # Already decoded text
+        print(m_code)
+    elif part['path'] == 'queryMetadata.json':
+        metadata = part['payload']  # Already parsed as dict
+        print(f"Format Version: {metadata['formatVersion']}")
+
+# Get raw base64 (no decoding)
+raw_definition = api.get_dataflow_definition(
+    workspace_id="workspace-guid",
+    dataflow_id="dataflow-guid",
+    decode_payloads=False  # Keep base64 payloads
+)
+```
+
+### Definition Parts
+
+| File | Content | Decoded As |
+|------|---------|------------|
+| `mashup.pq` | Power Query M code (transformation logic) | Text string |
+| `queryMetadata.json` | Query configuration, names, load settings | Python dict |
+| `.platform` | Platform metadata, refresh schedules | Python dict |
+
+### When to Use
+
+- ✅ **Analyze transformation logic** - Extract and review Power Query M code
+- ✅ **Documentation** - Document dataflow transformations and queries
+- ✅ **Migration/backup** - Archive dataflow definitions
+- ✅ **Troubleshooting** - Debug M code and query configurations
+- ✅ **Version control** - Track changes to dataflow definitions over time
+- ✅ **Metadata analysis** - Analyze query metadata and platform settings
+- ✅ **Workspace documentation** - Extract all dataflows for workspace documentation
+
+---
+
 ## License
 
 This is a utility wrapper for Microsoft Power BI Admin REST APIs. See Microsoft's API documentation for official terms and conditions.
@@ -648,5 +940,7 @@ This is a utility wrapper for Microsoft Power BI Admin REST APIs. See Microsoft'
 ## Resources
 
 - [Power BI Admin REST API Documentation](https://learn.microsoft.com/en-us/rest/api/power-bi/admin)
+- [Fabric Dataflow Definition API](https://learn.microsoft.com/en-us/rest/api/fabric/dataflow/items/get-dataflow-definition)
 - [Scanner API Setup Guide](https://learn.microsoft.com/en-us/power-bi/admin/service-admin-metadata-scanning)
+- [Scanner API Get Scan Result Example](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-get-scan-result)
 - [Service Principal Setup](https://learn.microsoft.com/en-us/power-bi/developer/embedded/embed-service-principal)

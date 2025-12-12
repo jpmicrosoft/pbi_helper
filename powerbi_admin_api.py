@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 class PowerBIAdminAPI:
     """
-    Comprehensive wrapper for Power BI Admin REST APIs.
+    Comprehensive wrapper for Power BI Admin REST APIs and Fabric APIs.
     
     Supports:
     - Workspace management and scanning
@@ -22,6 +22,7 @@ class PowerBIAdminAPI:
     - Tenant settings
     - Capacity management
     - Apps and dataflows
+    - Dataflow Gen2 definitions (Power Query M code)
     """
     
     def __init__(self, tenant_id: str, client_id: str, client_secret: str):
@@ -403,6 +404,150 @@ class PowerBIAdminAPI:
         )
         response.raise_for_status()
         return response.json().get("value", [])
+    
+    def get_dataflow_definition(
+        self,
+        workspace_id: str,
+        dataflow_id: str,
+        decode_payloads: bool = True,
+        timeout: int = 300,
+        poll_interval: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Get Dataflow Gen2 definition including Power Query M code.
+        
+        This uses the Fabric API (not Power BI Admin API) to retrieve the full
+        dataflow definition including queryMetadata.json, mashup.pq (M code),
+        and platform metadata.
+        
+        Args:
+            workspace_id: Workspace GUID containing the dataflow
+            dataflow_id: Dataflow GUID
+            decode_payloads: If True, automatically decodes base64 payloads (default: True)
+            timeout: Maximum seconds to wait for long-running operation (default: 300)
+            poll_interval: Seconds between status checks (default: 5)
+        
+        Returns:
+            Dictionary with 'definition' containing 'parts' array:
+            - queryMetadata.json: Query metadata (decoded JSON if decode_payloads=True)
+            - mashup.pq: Power Query M code (decoded string if decode_payloads=True)
+            - .platform: Platform metadata (decoded JSON if decode_payloads=True)
+        
+        Example:
+            # Get with automatic decoding (default)
+            definition = api.get_dataflow_definition(workspace_id, dataflow_id)
+            
+            for part in definition['definition']['parts']:
+                if part['path'] == 'mashup.pq':
+                    print(part['payload'])  # Already decoded M code
+                elif part['path'] == 'queryMetadata.json':
+                    print(part['payload'])  # Already decoded and parsed JSON
+        """
+        fabric_url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataflows/{dataflow_id}/getDefinition"
+        
+        # Initial POST request
+        response = requests.post(
+            fabric_url,
+            headers={
+                "Authorization": f"Bearer {self._get_token()}",
+                "Content-Type": "application/json"
+            }
+        )
+        
+        # Check if immediate success (200) or long-running operation (202)
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Decode payloads if requested
+            if decode_payloads:
+                result = self._decode_dataflow_definition(result)
+            
+            return result
+        
+        if response.status_code == 202:
+            # Long-running operation - poll for completion
+            operation_id = response.headers.get('x-ms-operation-id')
+            location_url = response.headers.get('Location')
+            
+            if not location_url:
+                raise Exception("Long-running operation started but no Location header provided")
+            
+            print(f"Retrieving dataflow definition... (Operation ID: {operation_id})")
+            
+            start_time = time.time()
+            attempts = 0
+            
+            while time.time() - start_time < timeout:
+                attempts += 1
+                time.sleep(poll_interval)
+                
+                # Poll the operation status
+                status_response = requests.get(
+                    location_url,
+                    headers={"Authorization": f"Bearer {self._get_token()}"}
+                )
+                
+                if status_response.status_code == 200:
+                    # Operation completed successfully
+                    print(f"✅ Dataflow definition retrieved successfully (attempt {attempts})")
+                    result = status_response.json()
+                    
+                    # Decode payloads if requested
+                    if decode_payloads:
+                        result = self._decode_dataflow_definition(result)
+                    
+                    return result
+                
+                elif status_response.status_code == 202:
+                    # Still in progress
+                    print(f"⏳ Definition retrieval in progress... (attempt {attempts}/{timeout // poll_interval})")
+                    continue
+                
+                else:
+                    # Error occurred
+                    status_response.raise_for_status()
+            
+            raise TimeoutError(f"Dataflow definition retrieval timed out after {timeout} seconds")
+        
+        else:
+            response.raise_for_status()
+    
+    def _decode_dataflow_definition(self, definition_response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Decode base64-encoded payloads in dataflow definition.
+        
+        Args:
+            definition_response: Raw API response with base64 payloads
+        
+        Returns:
+            Definition with decoded payloads (strings for .pq, parsed JSON for .json)
+        """
+        import base64
+        
+        if 'definition' not in definition_response or 'parts' not in definition_response['definition']:
+            return definition_response
+        
+        for part in definition_response['definition']['parts']:
+            if part.get('payloadType') == 'InlineBase64':
+                try:
+                    # Decode base64
+                    decoded_bytes = base64.b64decode(part['payload'])
+                    decoded_str = decoded_bytes.decode('utf-8')
+                    
+                    # Parse JSON for .json files
+                    if part['path'].endswith('.json'):
+                        part['payload'] = json.loads(decoded_str)
+                        part['payloadType'] = 'DecodedJSON'
+                    else:
+                        # Keep as string for .pq and other text files
+                        part['payload'] = decoded_str
+                        part['payloadType'] = 'DecodedText'
+                    
+                except Exception as e:
+                    # If decoding fails, keep original and add error info
+                    part['decode_error'] = str(e)
+        
+        return definition_response
     
     # ==================== APP OPERATIONS ====================
     
