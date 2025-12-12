@@ -8,27 +8,27 @@ import time
 from datetime import datetime
 
 # ============================================================
-# CONFIGURATION
-# ============================================================
-
-TENANT_ID = "your-tenant-id"
-CLIENT_ID = "your-client-id"
-CLIENT_SECRET = "your-client-secret"
-
-# Output settings
-OUTPUT_DIRECTORY = None  # Set to directory path like "C:/output" or "/lakehouse/default/Files/pbi_scans" (None = current directory)
-PRINT_TO_CONSOLE = True
-
-# ============================================================
 # SCAN SINGLE WORKSPACE
 # ============================================================
 
-def scan_workspace_for_dataflows(workspace_id: str):
+def scan_workspace_for_dataflows(
+    workspace_id: str,
+    tenant_id: str,
+    client_id: str,
+    client_secret: str,
+    output_directory: str = None,
+    print_to_console: bool = True
+):
     """
     Scan a single workspace and extract all Dataflow Gen2 connection information.
     
     Args:
         workspace_id: Single workspace GUID
+        tenant_id: Azure AD tenant ID
+        client_id: Service Principal client ID
+        client_secret: Service Principal client secret
+        output_directory: Directory path for output files (None = current directory)
+        print_to_console: Whether to print detailed output to console
     
     Returns:
         Dictionary with dataflow and connection details
@@ -36,9 +36,9 @@ def scan_workspace_for_dataflows(workspace_id: str):
     
     # Initialize API
     api = PowerBIAdminAPI(
-        tenant_id=TENANT_ID,
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret
     )
     
     print(f"\n{'='*60}")
@@ -250,16 +250,16 @@ def scan_workspace_for_dataflows(workspace_id: str):
     raw_filename = f"workspace_{workspace_name_clean}_{timestamp_str}_raw_scan.json"
     
     # Combine with output directory if provided
-    if OUTPUT_DIRECTORY:
-        if OUTPUT_DIRECTORY.startswith('/lakehouse/'):
+    if output_directory:
+        if output_directory.startswith('/lakehouse/'):
             # Lakehouse path - ensure proper formatting
-            output_file = OUTPUT_DIRECTORY.rstrip('/') + '/' + filename
-            raw_output_file = OUTPUT_DIRECTORY.rstrip('/') + '/' + raw_filename
+            output_file = output_directory.rstrip('/') + '/' + filename
+            raw_output_file = output_directory.rstrip('/') + '/' + raw_filename
         else:
             # Local path
             import os
-            output_file = os.path.join(OUTPUT_DIRECTORY, filename)
-            raw_output_file = os.path.join(OUTPUT_DIRECTORY, raw_filename)
+            output_file = os.path.join(output_directory, filename)
+            raw_output_file = os.path.join(output_directory, raw_filename)
     else:
         # Current directory
         output_file = filename
@@ -328,16 +328,20 @@ def scan_workspace_for_dataflows(workspace_id: str):
 # ============================================================
 
 if __name__ == "__main__":
-    # Specify workspace to scan
-    workspace_id = "your-workspace-guid"  # Replace with actual workspace GUID
-    
-    results = scan_workspace_for_dataflows(workspace_id)
+    # Example usage - pass parameters directly
+    results = scan_workspace_for_dataflows(
+        workspace_id="your-workspace-guid",
+        tenant_id="your-tenant-id",
+        client_id="your-client-id",
+        client_secret="your-client-secret",
+        output_directory="/lakehouse/default/Files/pbi_scans",  # or None
+        print_to_console=True
+    )
     
     # Optional: Display specific connection details
-    if PRINT_TO_CONSOLE:
-        print("\n📋 DETAILED CONNECTION LIST:")
-        for conn in results['all_connections']:
-            print(f"\nDataflow: {conn['dataflow_name']}")
-            print(f"  Type: {conn['datasource_type']}")
-            print(f"  Details: {json.dumps(conn['connection_details'], indent=4)}")
-            print(f"  Gateway: {conn['gateway_id'] or 'Cloud (no gateway)'}")
+    print("\n📋 DETAILED CONNECTION LIST:")
+    for conn in results['all_connections']:
+        print(f"\nDataflow: {conn['dataflow_name']}")
+        print(f"  Type: {conn['datasource_type']}")
+        print(f"  Details: {json.dumps(conn['connection_details'], indent=4)}")
+        print(f"  Gateway: {conn['gateway_id'] or 'Cloud (no gateway)'}")
