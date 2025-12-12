@@ -384,159 +384,260 @@ except requests.exceptions.RequestException as e:
 
 ## Single Workspace Dataflow Gen2 Scanner
 
-The `single_workspace_dataflow_scanner.py` script provides a targeted approach to scanning individual workspaces for Dataflow Gen2 connections. This is ideal for:
+The `single_workspace_dataflow_scanner.py` script provides a targeted approach to scanning individual workspaces for Dataflow Gen2 and Dataset metadata. This is ideal for:
 - **Avoiding rate limits** when dealing with large tenants (247k+ workspaces)
 - **Focused analysis** of specific workspaces
-- **Detailed connection extraction** with automatic file naming
+- **Detailed metadata extraction** including datasets, dataflows, and datasource instances
+- **Automatic dual file output** with both processed and raw scan results
 
-### Configuration
+### Features
 
-```python
-# Required credentials
-TENANT_ID = "your-tenant-id"
-CLIENT_ID = "your-client-id"
-CLIENT_SECRET = "your-client-secret"
+- ✅ **Extracts Datasets**: Tables, columns, measures, relationships, expressions, roles
+- ✅ **Extracts Dataflows**: Dataflow Gen2 objects with tables and connections
+- ✅ **Extracts Datasource Instances**: All datasource connection details
+- ✅ **Dual Output**: Processed JSON + Raw API response
+- ✅ **Auto Filename Generation**: Workspace name + timestamp
+- ✅ **Flexible Output**: Local files or Fabric lakehouse
+- ✅ **No Configuration File Edits**: Pass all parameters at runtime
 
-# Target workspace
-WORKSPACE_ID = "your-workspace-id"
+### Usage
 
-# Output directory (None = current directory)
-OUTPUT_DIRECTORY = None  # Or "C:/output" or "/lakehouse/default/Files/pbi_scans"
-```
+**All parameters are passed when calling the function - no need to edit the file!**
 
-### Usage Examples
-
-#### Example 1: Scan Single Workspace (Local)
+#### Basic Usage (Local Python)
 
 ```python
 from single_workspace_dataflow_scanner import scan_workspace_for_dataflows
 
-# Scan workspace - saves to current directory
-scan_workspace_for_dataflows("workspace-guid-here")
-
-# Output file: workspace_Sales_Analytics_20251212_143000_dataflows.json
+# Run with all parameters
+results = scan_workspace_for_dataflows(
+    workspace_id="your-workspace-guid",
+    tenant_id="your-tenant-id",
+    client_id="your-client-id",
+    client_secret="your-client-secret",
+    output_directory=None,  # Current directory
+    print_to_console=True
+)
 ```
 
-#### Example 2: Save to Specific Directory
+#### Save to Custom Directory
 
 ```python
-# Update configuration
-OUTPUT_DIRECTORY = "C:/pbi_scans/dataflows"
+results = scan_workspace_for_dataflows(
+    workspace_id="abc123-def456-789...",
+    tenant_id="tenant-id",
+    client_id="client-id",
+    client_secret="client-secret",
+    output_directory="C:/pbi_scans/dataflows",
+    print_to_console=True
+)
 
-# Scan workspace
-scan_workspace_for_dataflows("workspace-guid-here")
-
-# Output: C:/pbi_scans/dataflows/workspace_Sales_Analytics_20251212_143000_dataflows.json
+# Outputs:
+# C:/pbi_scans/dataflows/workspace_Sales_Analytics_20251212_143000_dataflows.json (processed)
+# C:/pbi_scans/dataflows/workspace_Sales_Analytics_20251212_143000_raw_scan.json (raw)
 ```
 
-#### Example 3: Save to Fabric Lakehouse
+#### Fabric Notebook (Lakehouse)
 
 ```python
-# Update configuration
-OUTPUT_DIRECTORY = "/lakehouse/default/Files/pbi_scans"
+# PySpark/Fabric notebook
+results = scan_workspace_for_dataflows(
+    workspace_id="workspace-guid",
+    tenant_id="tenant-id",
+    client_id="client-id",
+    client_secret="client-secret",
+    output_directory="/lakehouse/default/Files/pbi_scans",
+    print_to_console=True
+)
 
-# Scan workspace in Fabric notebook
-scan_workspace_for_dataflows("workspace-guid-here")
-
-# Output: /lakehouse/default/Files/pbi_scans/workspace_Sales_Analytics_20251212_143000_dataflows.json
+# Outputs to lakehouse:
+# /lakehouse/default/Files/pbi_scans/workspace_Sales_Analytics_20251212_143000_dataflows.json
+# /lakehouse/default/Files/pbi_scans/workspace_Sales_Analytics_20251212_143000_raw_scan.json
 ```
 
-#### Example 4: Run as Standalone Script
+#### Azure Blob Storage Path (abfss)
 
-```bash
-# Update credentials in the file, then run:
-python single_workspace_dataflow_scanner.py
+```python
+results = scan_workspace_for_dataflows(
+    workspace_id="workspace-guid",
+    tenant_id="tenant-id",
+    client_id="client-id",
+    client_secret="client-secret",
+    output_directory="abfss://workspace@onelake.dfs.fabric.microsoft.com/lakehouse.Lakehouse/Files/scans",
+    print_to_console=True
+)
 ```
 
-### Output Format
+### Output Files
 
-The scanner generates a comprehensive JSON file with auto-generated filename:
+The scanner generates **TWO files** per run:
 
-**Filename Pattern**: `workspace_{WorkspaceName}_{YYYYMMDD_HHMMSS}_dataflows.json`
+#### 1. Processed Results: `workspace_{Name}_{Timestamp}_dataflows.json`
 
-**Example**: `workspace_Sales_Analytics_20251212_143000_dataflows.json`
+Structured, processed metadata:
 
 ```json
 {
   "scan_timestamp": "2025-12-12T14:30:00.123456",
   "workspace_id": "abc123...",
   "workspace_name": "Sales Analytics",
+  "dataset_count": 2,
   "dataflow_count": 3,
   "total_connections": 5,
+  
+  "datasets": [
+    {
+      "name": "Sales Dataset",
+      "id": "dataset-guid",
+      "target_storage_mode": "Import",
+      "tables": [
+        {
+          "name": "Customers",
+          "column_count": 15,
+          "measure_count": 3,
+          "columns": [
+            {"name": "CustomerID", "data_type": "Int64", "is_hidden": false}
+          ],
+          "measures": [
+            {"name": "Total Sales", "expression": "SUM([Amount])"}
+          ]
+        }
+      ],
+      "relationships": [...],
+      "expressions": [...],
+      "datasource_usages": [...]
+    }
+  ],
+  
   "dataflows": [
     {
       "name": "Sales ETL",
       "id": "dataflow-guid",
-      "tables": ["Customers", "Orders", "Products"],
+      "tables": ["Customers", "Orders"],
       "connections": [
         {
-          "dataflow_name": "Sales ETL",
-          "dataflow_id": "dataflow-guid",
-          "workspace_id": "workspace-guid",
-          "workspace_name": "Sales Analytics",
           "datasource_type": "AzureSqlDatabase",
           "connection_details": {
             "server": "sqlserver.database.windows.net",
             "database": "SalesDB"
           },
-          "gateway_id": null,
-          "datasource_id": "datasource-guid"
+          "gateway_id": null
         }
       ]
     }
   ],
-  "all_connections": [...],
+  
+  "datasource_instances": [
+    {
+      "datasourceType": "Sql",
+      "connectionDetails": {...},
+      "datasourceId": "guid",
+      "gatewayId": "gateway-guid"
+    }
+  ],
+  
   "connection_breakdown": {
     "AzureSqlDatabase": 2,
-    "SharePointList": 1,
-    "AzureBlobStorage": 2
+    "SharePointList": 1
   }
 }
 ```
 
+#### 2. Raw Scan Results: `workspace_{Name}_{Timestamp}_raw_scan.json`
+
+Complete, unmodified API response from the Scanner API - matches the structure from [Microsoft's example](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/workspace-info-get-scan-result#example).
+
 ### Console Output
 
 ```
-Scanning workspace: abc123...
-✅ Scan initiated. Scan ID: scan-123...
-⏳ Scan in progress... (attempt 1/60)
-✅ Scan completed successfully
-
-Processing dataflows...
-  📊 Dataflow: Sales ETL (3 tables, 2 connections)
-  📊 Dataflow: Finance Import (2 tables, 1 connection)
-  📊 Dataflow: HR Data (1 table, 2 connections)
-
-✅ Saved to: workspace_Sales_Analytics_20251212_143000_dataflows.json
-
 ============================================================
-SUMMARY
+SCANNING WORKSPACE FOR DATAFLOW GEN2 CONNECTIONS
 ============================================================
+Workspace ID: abc123-def456-789...
+Started: 2025-12-12 14:30:00
+
+🔄 Initiating workspace scan...
+✅ Scan completed!
+
+📊 Found 2 dataset(s) and 3 dataflow(s) in workspace
+
+Dataset: Sales Dataset
+  ID: dataset-123
+  Configured by: user@contoso.com
+  Storage Mode: Import
+  Tables: 5
+    • Customers (Hidden: False)
+      - Columns: 15
+      - Measures: 3
+  Expressions/Parameters: 2
+    • DatabaseParam - Database connection parameter
+  Datasource Usages: 1
+
+Dataflow: Sales ETL
+  ID: dataflow-456
+  Configured by: user@contoso.com
+  Tables: 3
+    • Customers
+    • Orders
+    • Products
+  Connections: 2
+
+    📡 Connection Type: AzureSqlDatabase
+       Details: {
+         "server": "sqlserver.database.windows.net",
+         "database": "SalesDB"
+       }
+       Gateway ID: None
+
+✅ Saved processed results to lakehouse: /lakehouse/.../workspace_Sales_Analytics_20251212_143000_dataflows.json
+✅ Saved raw scan results to lakehouse: /lakehouse/.../workspace_Sales_Analytics_20251212_143000_raw_scan.json
+
+======================================================================
+📋 SCAN SUMMARY
+======================================================================
 Workspace: Sales Analytics
-Dataflows found: 3
-Total connections: 5
+Datasets: 2
+Dataflows: 3
+Total Connections: 5
+Datasource Instances: 8
+Misconfigured Datasources: 0
 
 Connection Breakdown:
-  - AzureSqlDatabase: 2
-  - SharePointList: 1
-  - AzureBlobStorage: 2
+  • AzureSqlDatabase: 2
+  • SharePointList: 1
+  • AzureBlobStorage: 2
+```
+
+### Function Parameters
+
+```python
+def scan_workspace_for_dataflows(
+    workspace_id: str,           # Required: Workspace GUID
+    tenant_id: str,              # Required: Azure AD tenant ID
+    client_id: str,              # Required: Service Principal client ID
+    client_secret: str,          # Required: Service Principal secret
+    output_directory: str = None, # Optional: Output path (None = current directory)
+    print_to_console: bool = True # Optional: Print detailed output
+)
 ```
 
 ### Key Features
 
-- **Automatic Filename Generation**: Workspace name + timestamp
-- **Flexible Output Location**: Current directory, custom path, or Fabric lakehouse
-- **Detailed Connection Info**: Type, server, database, gateway, datasource ID
-- **Flattened Connections**: `all_connections` array for easy filtering
-- **Connection Type Summary**: Breakdown by datasource type
-- **Rate Limit Friendly**: Scan one workspace at a time (1 API call vs 2,470 for 247k workspaces)
+- **No File Editing**: All configuration passed as parameters
+- **Dual Output**: Processed + raw API response
+- **Automatic Filenames**: `workspace_{Name}_{Timestamp}_dataflows.json` and `_raw_scan.json`
+- **Flexible Storage**: Local files, custom paths, or Fabric lakehouse
+- **Full Metadata**: Datasets, dataflows, datasources, expressions, relationships
+- **Lakehouse Support**: Works with `/lakehouse/` or `abfss://` paths
+- **Rate Limit Friendly**: 1 API call per workspace (vs 2,470 for 247k workspaces)
 - **Fabric Compatible**: Works in local Python and Fabric notebooks
 
 ### When to Use
 
 - ✅ **Large tenants** (100k+ workspaces) - avoid rate limits
 - ✅ **Targeted analysis** - focus on specific workspaces
-- ✅ **Dataflow Gen2 connections** - extract connection metadata
+- ✅ **Full metadata extraction** - datasets, dataflows, datasources
+- ✅ **Raw API data needed** - get both processed and raw results
 - ✅ **Repeated scans** - scan different workspaces without hitting limits
 - ✅ **Fabric integration** - save directly to lakehouse
 
